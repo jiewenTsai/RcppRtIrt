@@ -1,7 +1,7 @@
 # Origo — semi-modular inference for RT-IRT
 
-Status: **Argument Gate CLEAR** (see the gate block at the end). Earlier drafts and the reasons they
-did not clear are kept below the gate block for the record.
+Status: **Argument Gate CLEAR** (gate block below). Earlier drafts and the reasons they
+did not clear follow it for the record.
 
 ## Gate block
 
