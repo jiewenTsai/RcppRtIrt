@@ -14,7 +14,7 @@ summarise <- function(S, secs, label) {
   idd <- identified_draws(S)
   ess_s <- effectiveSize(mcmc(idd$summary))
   ess_raw <- effectiveSize(mcmc(idd$raw))
-  c(method = label, secs = secs,
+  c(method = label, secs = unname(secs),
     setNames(ess_s, paste0("ESS_", names(ess_s))),
     ESS_a_med = median(effectiveSize(mcmc(idd$a_id))),
     ESS_lamdev_med = median(effectiveSize(mcmc(idd$lamdev_id))),
