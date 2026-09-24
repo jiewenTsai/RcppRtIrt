@@ -69,3 +69,55 @@ Marginal tempering turns eta into a graded dial (information borrowed rises roug
 eta, slightly convex), whereas likelihood tempering passes ~70% of the information by eta = .25.
 At matched information the two give similar bias (e.g. info ≈ .3–.4: gap bias ≈ .11 for both), so
 the choice mainly changes how eta maps to borrowing, not the bias–information frontier.
+
+## Choosing eta (`exp_choose_eta.R`)
+
+Target: the group gap Delta = mean(theta_B) - mean(theta_A). The cut posterior (eta = 0) is the
+unbiased reference: D(eta) = Delta_hat(eta) - Delta_hat(0); under a correct RT module
+Var(D) ≈ V(0) - V(eta) (Hausman). Rules on the grid eta = 0, .1, .25, .4, .55, .75, 1:
+- **risk**: argmin R(eta) = D^2 - V(0) + 2 V(eta) (unbiased estimate of MSE of Delta_hat(eta));
+- **hausman**: largest eta before the first H(eta) = D^2 / (V(0) - V(eta)) ≥ 3.84.
+
+Marginal tempering; n = 500, p = 10, 6 datasets per shift (seeds 301–306), 3000 iterations.
+
+| shift | rule | mean eta | mean gap error | RMSE gap | RMSE theta |
+|---|---|---|---|---|---|
+| 0 | cut | 0 | .003 | .018 | .421 |
+| 0 | full | 1 | .023 | .029 | .368 |
+| 0 | risk | .72 | .013 | .020 | .376 |
+| 0 | hausman | .90 | .019 | .029 | .371 |
+| .25 | cut | 0 | .003 | .018 | .421 |
+| .25 | full | 1 | .106 | .108 | .373 |
+| .25 | risk | .10 | .009 | .019 | .416 |
+| .25 | hausman | .15 | .015 | .025 | .412 |
+| .5 | cut | 0 | .003 | .018 | .421 |
+| .5 | full | 1 | .159 | .161 | .381 |
+| .5 | risk | .07 | .010 | .021 | .418 |
+| .5 | hausman | .08 | .012 | .020 | .417 |
+
+Both rules keep most of the precision gain when the RT module is (nearly) right and fall back to
+near-cut when one group is slower: gap RMSE .019–.025 instead of .108–.161. The small full-model gap
+error at shift 0 (.023) comes from the item-level gamma differences between groups in `sim_smi()`.
+
+## Stage 2: inference on the RT module (`rt_sweeps.cpp`, `exp_stage2.R`, `exp_stage2_eta.R`)
+
+- `rt_sweeps_cpp()` reproduces the R sweep in distribution (theta fixed, 4500 sweeps: gamma-bar and
+  v quantiles agree to ~.002) at 0.076 ms vs 0.85 ms per sweep (~11x).
+- Nested MCMC with warm-started inner chains: K = 1 already matches a reference that runs a fresh
+  300-sweep chain for each of 500 thinned theta draws (gamma-bar median .368 vs .372, v .232 vs .230).
+  The naive-cut bias is negligible here because the RT-module Gibbs mixes fast and theta moves slowly.
+- **Attenuation under the cut.** The cut draws theta from p(theta | Y), not conditioned on RT, so the
+  stage-2 regression of log T on theta draws is an errors-in-variables regression:
+
+| eta | gamma-bar hat / truth | v hat (truth .15) | reliability of theta (1 - mean post var) |
+|---|---|---|---|
+| 0 | .80 | .235 | .817 |
+| .25 | .84 | .222 | .829 |
+| .5 | .89 | .206 | .839 |
+| .75 | .93 | .188 | .850 |
+| 1 | .99 | .167 | .862 |
+
+  (3 datasets, no speed shift.) The cut shrinks gamma by the reliability of theta, as plausible
+  values drawn without the secondary variable in the conditioning model would. SMI therefore trades
+  two errors: high eta biases group comparisons of theta when one group is slower; low eta
+  attenuates the speed–ability relation.
