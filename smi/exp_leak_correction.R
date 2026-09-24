@@ -15,7 +15,7 @@ scen <- data.frame(name = c("Z0", "Z25", "Z50", "Cnone", "Clinear", "Cthreshold"
 n_rep <- 50
 jobs <- expand.grid(s = seq_len(nrow(scen)), rep = 1:n_rep)
 target_fun <- function(z, binary) {
-  if (binary) function(M) rowMeans(M[, z == 1]) - rowMeans(M[, z == 0])
+  if (binary) function(M) rowMeans(M[, z == 1, drop = FALSE]) - rowMeans(M[, z == 0, drop = FALSE])
   else { zc <- z - mean(z); function(M) drop(M %*% zc) / sum(zc^2) }
 }
 fit_one <- function(k) {

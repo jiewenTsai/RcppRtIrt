@@ -180,3 +180,41 @@ target (gap by G, gap by Z). shiftG: G = 1 slower by 0.5; shiftZ: Z = 1 slower b
   (G) and 8/20 (Z) datasets. At small eta both D and V(0) − V(eta) are of the order of the Monte
   Carlo error of the posterior summaries, so H is dominated by that error. Use the risk rule, or a
   Hausman test that accounts for MC error.
+
+## Risk-rule coverage study — `exp_risk_coverage.R`
+
+100 datasets per scenario (MC SE of coverage ≈ 0.022), `sim_gz` with G conditioning in both means,
+eta grid {0, .1, .25, .5, .75, 1}. Coverage = 95% interval of the posterior at the chosen eta.
+
+| target | scenario | rule | mean eta | bias | cover | width | gap RMSE | theta RMSE |
+|---|---|---|---|---|---|---|---|---|
+| G | none | cut / full / risk | 0 / 1 / .61 | -.001 / -.003 / -.004 | .95 / .92 / .93 | .17 / .16 / .16 | .047 / .042 / .045 | .44 / .37 / .39 |
+| G | Z slower .5 | cut / full / risk | 0 / 1 / .67 | -.001 / -.003 / -.003 | .95 / .93 / .93 | .17 / .16 / .16 | .047 / .042 / .044 | .44 / .38 / .39 |
+| Z | none | cut / full / risk | 0 / 1 / .79 | .001 / .000 / .000 | .92 / .95 / .91 | .16 / .13 / .13 | .043 / .034 / .039 | .44 / .37 / .38 |
+| Z | Z slower .25 | cut / full / risk | 0 / 1 / .13 | .001 / **.073** / .006 | .92 / **.42** / .90 | .16 / .14 / .15 | .043 / .082 / .044 | .44 / .37 / .43 |
+| Z | Z slower .5 | cut / full / risk | 0 / 1 / .06 | .001 / **.125** / .004 | .92 / **.06** / .88 | .16 / .14 / .15 | .043 / .131 / .044 | .44 / .38 / .43 |
+| Z | Z slower .25 / .5 | hausman | .23 / .10 | .012 / .009 | .86 / .88 | | .048 / .046 | |
+
+Risk-rule eta (Z target): none → eta = 1 in 52/100, 0.75 in 24/100; Z slower .5 → 0 or 0.1 in 98/100.
+Post-selection coverage of the risk rule is .88–.91, about two MC SEs below nominal (the cut itself
+covers .92 for Z here).
+
+## Continuous speed covariate and score-based screen — `exp_continuous_z.R`, `tau_screen.R`
+
+50 datasets per shape. Target: OLS slope of theta on Zc (not in the model). Screen: casewise tau
+scores from the full fit, efficient score after G, ordered by Zc (power) or by an unrelated W (size).
+
+| shape | rule | mean eta | bias | cover | slope RMSE | theta RMSE |
+|---|---|---|---|---|---|---|
+| none | cut / full / risk | 0 / 1 / .78 | -.001 / -.002 / -.001 | .92 / .94 / .90 | .020 / .016 / .019 | .44 / .37 / .38 |
+| linear | cut / full / risk | 0 / 1 / .05 | -.001 / **.063** / .001 | .92 / **.08** / .92 | .020 / .065 / .020 | .44 / .38 / .44 |
+| threshold | cut / full / risk | 0 / 1 / .11 | -.001 / **.043** / .002 | .92 / **.26** / .92 | .020 / .046 / .021 | .44 / .38 / .43 |
+
+| shape | reject by Zc: DM / LM2 | reject by W (size): DM / LM2 |
+|---|---|---|
+| none | 0.00 / 0.04 | 0.06 / 0.06 |
+| linear | 1.00 / 1.00 | 0.02 / 0.02 |
+| threshold | 1.00 / 1.00 | 0.00 / 0.00 |
+
+The screen needs one full fit per dataset (no eta grid) and finds both linear and threshold speed
+drifts; size is near .05.
