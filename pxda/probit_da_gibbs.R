@@ -24,6 +24,35 @@ rtnorm_side <- function(mu, y) {           # z ~ N(mu, 1) truncated to z > 0 (y 
   ifelse(y == 1, mu - qnorm(u * pnorm(mu)), mu + qnorm(u * pnorm(-mu)))
 }
 
+slice1 <- function(x0, logf, width = 1, max_steps = 50) {   # univariate slice sampler (Neal 2003)
+  ly <- logf(x0) - rexp(1)
+  L <- x0 - runif(1) * width; U <- L + width
+  k <- max_steps
+  while (k > 0 && logf(L) > ly) { L <- L - width; k <- k - 1 }
+  k <- max_steps
+  while (k > 0 && logf(U) > ly) { U <- U + width; k <- k - 1 }
+  repeat {
+    x1 <- runif(1, L, U)
+    if (logf(x1) > ly) return(x1)
+    if (x1 < x0) L <- x1 else U <- x1
+  }
+}
+
+# z-scale PX-DA move for one probit regression block z ~ N(X beta, I), beta ~ N(m0, P0^{-1}):
+# z -> g z along the orbit, with beta integrated out. Target along the orbit (w.r.t. dg):
+#   pi(g) ∝ g^(n-1) exp(-(A g^2 - 2 B g) / 2),
+#   A = z'z - z'X V X'z,  B = z'c - z'X V X'c,  c = X m0,  V = (P0 + X'X)^{-1}.
+# Independence proposal g^2 ~ Gamma(n/2, A/2) is exact when B = 0; MH weight exp(B (g - 1)),
+# since the current state is g = 1. sign(g z) = sign(z), so the data are unaffected.
+zscale_move <- function(z, X, P0, m0, V) {
+  n <- length(z); cc <- drop(X %*% m0)
+  Xz <- crossprod(X, z); Xc <- crossprod(X, cc)
+  A <- sum(z^2) - drop(t(Xz) %*% V %*% Xz)
+  B <- sum(z * cc) - drop(t(Xz) %*% V %*% Xc)
+  g_new <- sqrt(rgamma(1, n / 2, A / 2))
+  if (log(runif(1)) < B * (g_new - 1)) g_new else 1
+}
+
 riwish <- function(df, S) solve(rWishart(1, df, solve(S))[, , 1])
 
 log_iw <- function(Sig, df, Psi) {         # IW log density up to a constant
@@ -39,6 +68,7 @@ log_mvn0 <- function(P, Sig) {             # sum_i log N(P[i, ]; 0, Sig) up to a
 probit_da_gibbs <- function(Y, logT, n_iter = 6000, n_burn = 1000,
                             method = c("expanded", "identified"),
                             scale_move = FALSE, shear_move = FALSE,
+                            collapse_items = FALSE, zscale_px = FALSE,
                             nu0 = 4, seed = 1) {
   method <- match.arg(method)
   if (method == "identified" && (scale_move || shear_move))
@@ -62,23 +92,53 @@ probit_da_gibbs <- function(Y, logT, n_iter = 6000, n_burn = 1000,
     mu <- outer(pers[, 1], a) - matrix(d, n, p, byrow = TRUE)
     Z <- matrix(rtnorm_side(mu, Y), n, p)
 
-    # 2. persons (theta, tau) jointly; the posterior precision is common to all persons
+    # 2-3. persons and items (a_j, d_j)
     R <- logT - matrix(xi, n, p, byrow = TRUE)                 # = lam theta - tau + e
     w <- 1 / s2
-    A <- matrix(c(sum(a^2) + sum(lam^2 * w), -sum(lam * w),
-                  -sum(lam * w), sum(w)), 2)
-    V <- solve(solve(Sig) + A)
-    Bm <- cbind((Z + matrix(d, n, p, byrow = TRUE)) %*% a + R %*% (lam * w),
-                -R %*% w)
-    pers <- Bm %*% V + matrix(rnorm(2 * n), n) %*% chol(V)
+    Prt <- matrix(c(sum(lam^2 * w), -sum(lam * w), -sum(lam * w), sum(w)), 2)   # RT part
+    Brt <- cbind(R %*% (lam * w), -R %*% w)
+    if (collapse_items) {
+      # Partially collapsed: draw each (a_j, d_j) from p(a_j, d_j | z, log T, other items)
+      # with persons integrated out, then persons from their full conditional.
+      Zd <- Z + matrix(d, n, p, byrow = TRUE)
+      P <- solve(Sig) + Prt + matrix(c(sum(a^2), 0, 0, 0), 2)
+      B <- Brt + cbind(Zd %*% a, 0)
+      for (j in 1:p) {
+        Pm <- P - matrix(c(a[j]^2, 0, 0, 0), 2)                 # leave item j out
+        Bm <- B; Bm[, 1] <- Bm[, 1] - a[j] * Zd[, j]
+        Vm <- solve(Pm); m1 <- drop(Bm %*% Vm[, 1]); v11 <- Vm[1, 1]
+        zj <- Z[, j]
+        logpost_a <- function(aa) {                           # d_j integrated out, prior N(0, 4)
+          s2a <- 1 + aa^2 * v11; u <- aa * m1 - zj; ub <- mean(u)
+          dnorm(aa, 1, 1, log = TRUE) - n / 2 * log(s2a) - sum((u - ub)^2) / (2 * s2a) +
+            0.5 * log(s2a / n) + dnorm(ub, 0, sqrt(4 + s2a / n), log = TRUE)
+        }
+        a[j] <- slice1(a[j], logpost_a, width = 0.5)
+        s2a <- 1 + a[j]^2 * v11; u <- a[j] * m1 - zj
+        prec <- n / s2a + 1 / 4
+        d[j] <- rnorm(1, sum(u) / s2a / prec, sqrt(1 / prec))
+        Zd[, j] <- Z[, j] + d[j]
+        P <- Pm + matrix(c(a[j]^2, 0, 0, 0), 2)
+        B <- Bm; B[, 1] <- B[, 1] + a[j] * Zd[, j]
+      }
+      V <- solve(P)
+      pers <- B %*% V + matrix(rnorm(2 * n), n) %*% chol(V)
+    } else {
+      A <- Prt + matrix(c(sum(a^2), 0, 0, 0), 2)
+      V <- solve(solve(Sig) + A)
+      Bm <- Brt + cbind((Z + matrix(d, n, p, byrow = TRUE)) %*% a, 0)
+      pers <- Bm %*% V + matrix(rnorm(2 * n), n) %*% chol(V)
+      th <- pers[, 1]
+      X <- cbind(th, -1)
+      Vad <- solve(P0ad + crossprod(X))
+      if (zscale_px) {                 # Liu-Wu PX-DA on each item's latent scale (z_j, a_j, d_j)
+        for (j in 1:p) Z[, j] <- Z[, j] * zscale_move(Z[, j], X, P0ad, m0ad, Vad)
+      }
+      Mad <- Vad %*% (drop(P0ad %*% m0ad) + crossprod(X, Z))
+      AD <- Mad + t(chol(Vad)) %*% matrix(rnorm(2 * p), 2)
+      a <- AD[1, ]; d <- AD[2, ]
+    }
     th <- pers[, 1]; ta <- pers[, 2]
-
-    # 3. items (a_j, d_j): z_j = a_j theta - d_j + e, common design
-    X <- cbind(th, -1)
-    Vad <- solve(P0ad + crossprod(X))
-    Mad <- Vad %*% (drop(P0ad %*% m0ad) + crossprod(X, Z))
-    AD <- Mad + t(chol(Vad)) %*% matrix(rnorm(2 * p), 2)
-    a <- AD[1, ]; d <- AD[2, ]
 
     # 4. (xi_j, lambda_j): log T_j + tau = xi_j + lambda_j theta + e
     W <- cbind(1, th); WtW <- crossprod(W); Wty <- crossprod(W, logT + ta)

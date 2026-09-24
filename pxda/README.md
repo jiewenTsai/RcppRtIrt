@@ -33,3 +33,31 @@ Mean over the 4 datasets:
   truncated because nimble's PG sampler requires a dnorm prior; relabel post hoc.
 - Caveats: one condition, 4 datasets; nimble uses a logit link on probit data; M1 has a
   different prior on the identified quantities than M2–M4.
+
+## Where the discrimination bottleneck is (2026-09-24)
+
+`a_j sqrt(S11)` is the slowest quantity in every DA variant (median ESS ~450 of 5000).
+
+1. **Collapsing theta does not help.** `collapse_items = TRUE` draws each (a_j, d_j) with the persons
+   integrated out (leave-one-item-out Gaussian posterior, slice on a_j, d_j exact), then the
+   persons. `check_collapse_posterior.R` confirms it targets the same posterior (n = 60, p = 5,
+   55k draws each: all quantiles agree). ESS for a is unchanged (456 → 477) at twice the R cost.
+2. **The DA latent z is the bottleneck.** `diag_z_single_item.R`, theta fixed at the truth, one
+   item updated by Albert–Chib: ESS for a = 1161 / 520 / 210 when a = 0.8 / 1.2 / 2.0
+   (lag-1 autocorrelation .65 / .81 / .92).
+3. **Liu–Wu PX-DA on the latent-response scale fixes it.** Move (z_j, a_j, d_j) → g (z_j, a_j, d_j)
+   with (a_j, d_j) integrated out (`zscale_move()`; Gamma proposal plus MH weight exp(B(g − 1))).
+   Single item (`diag_zscale_px_single_item.R`): ESS 818 → 1425, 437 → 1027, 176 → 662 for
+   a = 0.8, 1.2, 2.0; posterior means and SDs unchanged.
+
+Full RT-IRT, 4 datasets (`bench_collapse.R`, n = 500, p = 15, 5000 saved draws):
+
+| variant | sec | ESS kappa | ESS rho* | med ESS a_id | min ESS a_id | ESS/s a_id (med) |
+|---|---|---|---|---|---|---|
+| standard expanded DA | 24.1 | 2981 | 2891 | 456 | 200 | 19.5 |
+| + collapsed theta for items | 43.2 | 2927 | 2851 | 477 | 266 | 11.0 |
+| + z-scale PX-DA per item | 27.1 | 2798 | 2619 | 712 | 495 | 26.3 |
+
+The z-scale move raises median item ESS by ~56% and the worst item by ~2.5x at ~12% more time.
+The theta-scale and shear moves (earlier table) act on unidentified directions only; the working
+parameter that matters here is the latent-response scale of each item.

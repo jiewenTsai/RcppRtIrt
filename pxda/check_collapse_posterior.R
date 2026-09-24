@@ -1,0 +1,11 @@
+if (file.exists("../pxda/probit_da_gibbs.R")) setwd("..")
+source("pxda/probit_da_gibbs.R"); source("pxda/sim_data.R")
+dat <- sim_pxda(60, 5, seed = 9)
+q <- function(S) { idd <- identified_draws(S)
+  X <- cbind(idd$summary, a1 = idd$a_id[, 1], a3 = idd$a_id[, 3], lamdev1 = idd$lamdev_id[, 1])
+  apply(X, 2, quantile, c(.1, .5, .9)) }
+set.seed(1)
+S0 <- probit_da_gibbs(dat$Y, dat$logT, 60000, 5000, "expanded", seed = 11)
+S1 <- probit_da_gibbs(dat$Y, dat$logT, 60000, 5000, "expanded", collapse_items = TRUE, seed = 12)
+cat("standard DA\n"); print(round(q(S0), 3))
+cat("partially collapsed\n"); print(round(q(S1), 3))
