@@ -38,7 +38,7 @@ if (!exists("rtnorm_side")) source("pxda/probit_da_gibbs.R")
 smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0,
                       zscale_px = TRUE, seed = 1, keep_theta = TRUE,
                       temper = c("likelihood", "marginal"), use_cpp = FALSE,
-                      Xth = NULL, Xtau = NULL) {
+                      Xth = NULL, Xtau = NULL, keep_tau = FALSE) {
   temper <- match.arg(temper)
   if (!is.null(Xtau) && K_inner > 0) stop("Xtau needs K_inner = 0")
   if (use_cpp && !exists("rt_sweeps_cpp")) Rcpp::sourceCpp("smi/rt_sweeps.cpp")
@@ -57,10 +57,12 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
   B_th <- B_tau <- NULL
   S_tau <- rep(0, n)                          # running sum of the casewise tau-location score
   S_s2 <- rep(0, p)                           # running sum of sigma^2 (stage 1)
+  S_d <- rep(0, p)                            # running sum of d
   P0ad <- diag(c(1, 1 / 4)); m0ad <- c(1, 0)
   P0xg <- diag(c(1 / 100, 1)); m0xg <- c(4, 0)
   n_save <- n_iter - n_burn
   TH <- if (keep_theta) matrix(NA_real_, n_save, n) else NULL
+  U <- if (keep_tau) matrix(NA_real_, n_save, n) else NULL          # speed residual tau - m_tau
   A <- matrix(NA_real_, n_save, p); G1 <- G2 <- matrix(NA_real_, n_save, p)
   V1 <- V2 <- numeric(n_save)
   if (!is.null(Xth)) B_th <- matrix(NA_real_, n_save, ncol(Xth))
@@ -155,15 +157,16 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     if (it > n_burn) {
       k <- it - n_burn
       if (keep_theta) TH[k, ] <- th
+      if (keep_tau) U[k, ] <- tau - m_tau
       A[k, ] <- a; G1[k, ] <- gam; V1[k] <- v
       if (!is.null(Xth)) B_th[k, ] <- bet_th
       if (!is.null(Xtau)) B_tau[k, ] <- b_tau
       if (eta > 0) S_tau <- S_tau + (tau - m_tau) / v
-      S_s2 <- S_s2 + s2
+      S_s2 <- S_s2 + s2; S_d <- S_d + d
       if (K_inner > 0) { G2[k, ] <- gam2; V2[k] <- v2 }
     }
   }
-  list(theta = TH, a = A, gamma_stage1 = G1, v_stage1 = V1,
+  list(theta = TH, tau_resid = U, a = A, d_mean = S_d / n_save, gamma_stage1 = G1, v_stage1 = V1,
        gamma_stage2 = if (K_inner > 0) G2 else NULL, v_stage2 = if (K_inner > 0) V2 else NULL,
        beta_theta = B_th, beta_tau = B_tau,
        s2_stage1_mean = S_s2 / n_save,
