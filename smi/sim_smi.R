@@ -29,3 +29,21 @@ sim_gz <- function(n = 500, p = 10, seed = 1, gap_G = .3, shift_Z = .5, gam = .5
   logT <- matrix(xi, n, p, byrow = TRUE) - tau + outer(th, g) + matrix(rnorm(n * p), n) %*% diag(s)
   list(Y = Y, logT = logT, theta = th, G = G, Z = Z)
 }
+
+# sim_cz — like sim_gz but the speed-related variable Zc is continuous, Zc = 0.8 (G - 1/2) + N(0, 1),
+# with no ability effect. Speed shift in tau: "none", "linear" (Zc slower by 0.25 per SD), or
+# "threshold" (slower by 0.5 when Zc > 0.5). W ~ N(0, 1) is an unrelated placebo covariate.
+sim_cz <- function(n = 500, p = 10, seed = 1, gap_G = .3, shape = c("none", "linear", "threshold"),
+                   gam = .5, v = .15) {
+  shape <- match.arg(shape)
+  set.seed(seed)
+  a <- runif(p, .7, 1.5); d <- rnorm(p, 0, .6); xi <- rnorm(p, 4, .2); s <- runif(p, .3, .6)
+  g <- rnorm(p, gam, .1)
+  G <- rbinom(n, 1, .5); Zc <- .8 * (G - .5) + rnorm(n); W <- rnorm(n)
+  th <- rnorm(n) + gap_G * (G - .5)
+  shift <- switch(shape, none = 0, linear = .25 * Zc, threshold = .5 * (Zc > .5))
+  tau <- rnorm(n, 0, sqrt(v)) - shift
+  Y <- matrix(rbinom(n * p, 1, pnorm(outer(th, a) - rep(1, n) %o% d)), n)
+  logT <- matrix(xi, n, p, byrow = TRUE) - tau + outer(th, g) + matrix(rnorm(n * p), n) %*% diag(s)
+  list(Y = Y, logT = logT, theta = th, G = G, Zc = Zc, W = W)
+}

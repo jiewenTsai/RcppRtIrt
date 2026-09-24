@@ -55,6 +55,7 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     drop(Vb %*% crossprod(X, y) / s2y + t(chol(Vb)) %*% rnorm(ncol(X)))
   }
   B_th <- B_tau <- NULL
+  S_tau <- rep(0, n)                          # running sum of the casewise tau-location score
   P0ad <- diag(c(1, 1 / 4)); m0ad <- c(1, 0)
   P0xg <- diag(c(1 / 100, 1)); m0xg <- c(4, 0)
   n_save <- n_iter - n_burn
@@ -156,10 +157,13 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
       A[k, ] <- a; G1[k, ] <- gam; V1[k] <- v
       if (!is.null(Xth)) B_th[k, ] <- bet_th
       if (!is.null(Xtau)) B_tau[k, ] <- b_tau
+      if (eta > 0) S_tau <- S_tau + (tau - m_tau) / v
       if (K_inner > 0) { G2[k, ] <- gam2; V2[k] <- v2 }
     }
   }
   list(theta = TH, a = A, gamma_stage1 = G1, v_stage1 = V1,
        gamma_stage2 = if (K_inner > 0) G2 else NULL, v_stage2 = if (K_inner > 0) V2 else NULL,
-       beta_theta = B_th, beta_tau = B_tau, eta = eta, K_inner = K_inner)
+       beta_theta = B_th, beta_tau = B_tau,
+       tau_score = if (eta > 0) S_tau / n_save else NULL,   # posterior mean of (tau_i - m_i) / v
+       eta = eta, K_inner = K_inner)
 }
