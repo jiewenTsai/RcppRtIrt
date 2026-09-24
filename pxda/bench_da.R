@@ -22,8 +22,10 @@ summarise <- function(S, secs, label) {
     setNames(colMeans(idd$summary), paste0("mean_", colnames(idd$summary))))
 }
 res <- list()
+rpart_file <- file.path(outdir, sprintf("bench_da_seed%d_Rpart.rds", seed))
 
 ## R probit DA Gibbs ---------------------------------------------------------
+if (file.exists(rpart_file)) res <- readRDS(rpart_file) else {
 cfgs <- list(M1_identified = list("identified", FALSE, FALSE),
              M2_expanded   = list("expanded", FALSE, FALSE),
              M3_scale      = list("expanded", TRUE, FALSE),
@@ -34,6 +36,8 @@ for (nm in names(cfgs)) {
   S <- probit_da_gibbs(dat$Y, dat$logT, n_iter, n_burn, method = cf[[1]],
                        scale_move = cf[[2]], shear_move = cf[[3]], seed = seed)
   res[[nm]] <- summarise(S, proc.time()[3] - t0, nm)
+}
+saveRDS(res, rpart_file)
 }
 
 ## nimble (logit) -------------------------------------------------------------
@@ -63,7 +67,8 @@ add_pg <- function(conf) {
     tg <- c(sprintf("a[%d]", j), sprintf("d[%d]", j))
     conf$removeSamplers(tg)
     conf$addSampler(target = tg, type = "polyagamma",
-                    control = list(fixedDesignColumns = c(FALSE, TRUE)))
+                    control = list(fixedDesignColumns = c(FALSE, TRUE),
+                                   nonTargetNodes = sprintf("pers[1:%d, 1:2]", n)))
   }
   conf
 }
