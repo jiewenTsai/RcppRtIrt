@@ -120,3 +120,110 @@ sampler_pxScale <- nimbleFunction(
     }
   )
 )
+
+# -----------------------------------------------------------------------------
+# sampler_pxShear — 剪切群作用（處理 cross-loading 的共同部分與 rho 的不可識別方向）
+#
+# 在 log T_ij ~ N(xi_j - tau_i + lambda_j theta_i, sigma_j^2) 下，對任意 c：
+#   tau_i'    = tau_i + c * theta_i          （targetNodes += c * sourceNodes，逐一配對）
+#   lambda_j' = lambda_j + c                 （shiftNodes += c * shiftSign）
+#   Sigma'    = L Sigma L^T,  L = I + c e_k e_i^T  （k = targetIndex, i = sourceIndex）
+# 則 -tau' + lambda' theta = -tau + lambda theta，且 (theta, tau') 仍為常態，概似不變。
+# 三個部分的 Jacobian 都是 1（單位三角變換；對稱矩陣上 det = |det L|^{d+1} = 1），
+# c ~ N(0, scale^2) 對稱，(x, c) -> (T_c x, -c) 為對合，所以
+#   log r = log pi(T_c x) - log pi(x).
+# 若 RT 模式有時間鑑別度 phi_j（-phi_j tau_i），需改為 lambda_j' = lambda_j + c phi_j，
+# 本 sampler 只支援 phi_j = 1。
+#
+# control:
+#   sourceNodes, targetNodes : 等長的純量元素（例如 pers[1:n, 1] 與 pers[1:n, 2]）
+#   shiftNodes               : 平移 c 的節點（例如 lambda[1:p]），可省略
+#   shiftSign                : 平移方向（預設 1）
+#   covNode, sourceIndex, targetIndex : 共變矩陣節點與列索引（預設 1, 2）
+#   skipInvariant, scale, adaptive    : 同 sampler_pxScale
+#   logRatioSlopeOverride    : 僅供測試，在 log r 加上 slope * c（故意破壞正確性）
+sampler_pxShear <- nimbleFunction(
+  name = "sampler_pxShear",
+  contains = sampler_BASE,
+  setup = function(model, mvSaved, target, control) {
+    srcNodes <- model$expandNodeNames(control$sourceNodes, returnScalarComponents = TRUE)
+    tgtNodes <- model$expandNodeNames(control$targetNodes, returnScalarComponents = TRUE)
+    if (length(srcNodes) != length(tgtNodes)) stop("pxShear: sourceNodes and targetNodes differ in length")
+    shiftNodes <- if (is.null(control$shiftNodes)) character(0) else
+      model$expandNodeNames(control$shiftNodes, returnScalarComponents = TRUE)
+    shiftSign <- if (is.null(control$shiftSign)) 1 else control$shiftSign
+    covNode <- if (is.null(control$covNode)) character(0) else control$covNode
+    iS <- if (is.null(control$sourceIndex)) 1 else control$sourceIndex
+    kT <- if (is.null(control$targetIndex)) 2 else control$targetIndex
+    skipInv  <- isTRUE(control$skipInvariant)
+    scale    <- if (is.null(control$scale)) 0.1 else control$scale
+    adaptive <- if (is.null(control$adaptive)) TRUE else control$adaptive
+    slopeOverride <- if (is.null(control$logRatioSlopeOverride)) 0 else control$logRatioSlopeOverride
+    for (nd in c(srcNodes, tgtNodes, shiftNodes)) {
+      if (!model$isStoch(nd)) stop("pxShear: ", nd, " is not a stochastic node")
+      if (model$isData(nd))   stop("pxShear: ", nd, " is a data node")
+    }
+    hasShift <- length(shiftNodes) > 0
+    hasCov   <- length(covNode) > 0
+    if (!hasShift) shiftNodes <- srcNodes[1]
+    if (hasCov) {
+      cv <- model$expandNodeNames(covNode, returnScalarComponents = TRUE)
+      d <- round(sqrt(length(cv)))
+      if (d^2 != length(cv)) stop("pxShear: covNode must be a square matrix node")
+      if (iS == kT || max(iS, kT) > d || min(iS, kT) < 1) stop("pxShear: bad source/target index")
+    } else {
+      cv <- srcNodes[1]; d <- 1
+    }
+    moved <- c(srcNodes, tgtNodes, if (hasShift) shiftNodes, if (hasCov) cv)
+    calcNodes <- model$getDependencies(unique(moved))
+    if (skipInv) calcNodes <- calcNodes[!model$isData(calcNodes)]
+    scaleOriginal <- scale
+    timesRan <- 0; timesAccepted <- 0; timesAdapted <- 0
+    adaptInterval <- 100
+  },
+  run = function() {
+    cc <- rnorm(1, 0, scale)
+    lp0 <- model$getLogProb(calcNodes)
+    values(model, tgtNodes) <<- values(model, tgtNodes) + cc * values(model, srcNodes)
+    if (hasShift) values(model, shiftNodes) <<- values(model, shiftNodes) + shiftSign * cc
+    if (hasCov) {
+      vc <- values(model, cv)          # column-major：(r, c) 位於 (c - 1) * d + r
+      vn <- vc
+      for (r in 1:d) {
+        for (col in 1:d) {
+          val <- vc[(col - 1) * d + r]
+          if (r == kT)   val <- val + cc * vc[(col - 1) * d + iS]
+          if (col == kT) val <- val + cc * vc[(iS - 1) * d + r]
+          if (r == kT & col == kT) val <- val + cc * cc * vc[(iS - 1) * d + iS]
+          vn[(col - 1) * d + r] <- val
+        }
+      }
+      values(model, cv) <<- vn
+    }
+    lp1 <- model$calculate(calcNodes)
+    logMHR <- lp1 - lp0 + slopeOverride * cc
+    jump <- decide(logMHR)
+    if (jump) {
+      nimCopy(from = model, to = mvSaved, row = 1, nodes = calcNodes, logProb = TRUE)
+    } else {
+      nimCopy(from = mvSaved, to = model, row = 1, nodes = calcNodes, logProb = TRUE)
+    }
+    if (adaptive) {
+      timesRan <<- timesRan + 1
+      if (jump) timesAccepted <<- timesAccepted + 1
+      if (timesRan %% adaptInterval == 0) {
+        acc <- timesAccepted / timesRan
+        timesAdapted <<- timesAdapted + 1
+        g <- 10 / ((timesAdapted + 3)^0.8)
+        scale <<- scale * exp(g * (acc - 0.44))
+        timesRan <<- 0; timesAccepted <<- 0
+      }
+    }
+  },
+  methods = list(
+    reset = function() {
+      scale <<- scaleOriginal
+      timesRan <<- 0; timesAccepted <<- 0; timesAdapted <<- 0
+    }
+  )
+)
