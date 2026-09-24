@@ -13,6 +13,7 @@ n_rep <- 100
 jobs <- expand.grid(eta = etas, scen = names(scen), rep = 1:n_rep, stringsAsFactors = FALSE)
 fit_one <- function(k) {
   jb <- jobs[k, ]
+  if (nzchar(Sys.getenv("SMI_PROGRESS"))) cat(k, "\n", file = Sys.getenv("SMI_PROGRESS"), append = TRUE)
   dat <- sim_gz(seed = 2000 + jb$rep, shift_Z = scen[[jb$scen]])
   X <- cbind(G = dat$G - mean(dat$G))
   fit <- smi_rtirt(dat$Y, dat$logT, eta = jb$eta, n_iter = 2000, n_burn = 500, seed = jb$rep,
