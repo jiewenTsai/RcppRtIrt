@@ -14,7 +14,7 @@
 // │ omega_ij (PG 輔助)    │ pg::rpg_hybrid() — exact/SP/Normal 自動選擇       │
 // │ a_j (鑑別度)          │ Conjugate Gibbs: TruncNormal(0,∞), inverse-CDF    │
 // │ b_j (難度)            │ Conjugate Gibbs: Normal                            │
-// │ theta_i (能力)        │ Conjugate Gibbs: Normal + mean-centering          │
+// │ theta_i (能力)        │ Conjugate Gibbs: Normal（條件於 tau）              │
 // │ xi_j (題目時間強度)   │ Conjugate Gibbs: TruncNormal(0,∞), inverse-CDF    │
 // │ sigma_t_j (RT殘差SD)  │ Conjugate Gibbs: InvGamma → sqrt                  │
 // │ tau_i (速度)          │ Conjugate Gibbs: Normal                            │
@@ -42,7 +42,7 @@
 //       → 對 n 夠大（n > 100）影響不大；適合 Gibbs 主迴圈。
 //
 // 更新順序（每次迭代）：
-//   Sigma_p → omega(PG) → a → b → theta(+centering) → xi → sigma_t → tau
+//   Sigma_p → omega(PG) → a → b → theta | tau → xi → sigma_t → tau | theta
 //   ★ 關鍵：a 必須在 b 之前更新
 //      因為 draw_b 的 precision = a_j^2 * sum(omega)，
 //      若 a 先被抽到很小（如 0.01），b 的 precision ≈ 0，
@@ -50,7 +50,9 @@
 //      a 先更新可以讓 b 看到合理的 a，反之亦然。
 //
 // 識別限制：
-//   - mean(theta) = 0：每次 iter 對 theta 做 mean-centering（不截斷到 ±10）
+//   - theta 的位置由先驗平均識別（null: 0；structural: fix_int=TRUE）。
+//     不在迭代中做 mean-centering：只平移 theta 而不平移 b 會改變似然，
+//     鏈就不再以後驗為平穩分布。
 //   - a_j > 0：TruncNormal(0,∞) 保證（不需要額外限制）
 //   - fix_int=TRUE：令 beta[intercept,] = 0（IRT 本身不需要截距）
 //
@@ -411,7 +413,7 @@ List draw_ab_collapsed(const arma::mat& kappa,
       b[j] = R::rnorm(parM, std::sqrt(parV));
     }
 
-    // 4. Update theta | omega, a, b + mean-center
+    // 4. Update theta | omega, a, b
     arma::vec a2 = a % a;
     for (int i = 0; i < n; ++i) {
       double parV  = 1.0 / (inv_st2 + arma::dot(a2, omega.row(i).t()));
@@ -419,7 +421,6 @@ List draw_ab_collapsed(const arma::mat& kappa,
       double parM  = parV * (mu_theta[i] * inv_st2 + sum_t);
       theta[i] = R::rnorm(parM, std::sqrt(parV));
     }
-    theta -= arma::mean(theta);
   }
 
   return List::create(Named("a") = a, Named("b") = b,
@@ -915,6 +916,23 @@ arma::mat make_design(const arma::mat& X) {
   return arma::join_horiz(arma::ones(X.n_rows,1), X);
 }
 
+// (theta_i, tau_i) ~ BVN((mu_theta_i, mu_tau_i), Sigma_p)：
+// 抽 theta 時要用 theta | tau 的條件先驗，抽 tau 時用 tau | theta，
+// 否則 Sigma_p 的共變（RT 對能力的資訊）不會進入人員參數的更新。
+// k = 0 → theta | tau；k = 1 → tau | theta
+inline arma::vec cond_person_mean(const arma::vec& mu_self,
+                                  const arma::vec& mu_other,
+                                  const arma::vec& other,
+                                  const arma::mat& Sigma_p, int k) {
+  int o = 1 - k;
+  return mu_self + (Sigma_p(k, o) / Sigma_p(o, o)) * (other - mu_other);
+}
+
+inline double cond_person_var(const arma::mat& Sigma_p, int k) {
+  int o = 1 - k;
+  return Sigma_p(k, k) - Sigma_p(k, o) * Sigma_p(k, o) / Sigma_p(o, o);
+}
+
 inline void identify_theta_scale(arma::vec& theta,
                                  arma::vec& a,
                                  arma::vec& b) {
@@ -1026,6 +1044,8 @@ List gibbs_rtirt_null(const arma::mat& Y,
 
     // 2. PG 輔助
     arma::mat omega = draw_pg_irt(theta, a, b);
+    arma::vec mu_theta_c = cond_person_mean(mu0, mu0, tau, Sigma_p, 0);
+    double    v_theta_c  = cond_person_var(Sigma_p, 0);
 
     // 3. IRT：collapsed Gibbs — 每次 outer iter 做 n_inner 步 inner (omega, a, b)
     //    n_inner=1 等同標準 Gibbs；n_inner=3 ESS 提升 ~3x，時間增加 ~60%
@@ -1035,8 +1055,7 @@ List gibbs_rtirt_null(const arma::mat& Y,
       a = as<arma::vec>(ab_mh["a"]);
       b = as<arma::vec>(ab_mh["b"]);
       omega = draw_pg_irt(theta, a, b);
-      theta = draw_theta(kappa, omega, a, b, mu0, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
       if (adaptive_mh && m < n_burnin && adapt_every > 0 && (m + 1) % adapt_every == 0) {
         double acc = as<double>(ab_mh["accept_rate"]);
         double gamma = 1.0 / std::sqrt(1.0 + adapt_count);
@@ -1050,7 +1069,7 @@ List gibbs_rtirt_null(const arma::mat& Y,
     } else if (!one_pl) {
       // Collapsed: (omega, a, b, theta) cycle K times — theta included in inner loop
       List ab = draw_ab_collapsed(kappa, omega, theta, a, b,
-                                   mu0, Sigma_p(0,0),
+                                   mu_theta_c, v_theta_c,
                                    mu_a, sigma_a, 0.0, 1.0, n_inner);
       a     = as<arma::vec>(ab["a"]);
       b     = as<arma::vec>(ab["b"]);
@@ -1058,8 +1077,7 @@ List gibbs_rtirt_null(const arma::mat& Y,
       omega = as<arma::mat>(ab["omega"]);
     } else {
       b = draw_b(kappa, omega, theta, a, 0.0, 1.0);
-      theta = draw_theta(kappa, omega, a, b, mu0, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
     }
 
     // 5. RT 項目
@@ -1086,7 +1104,9 @@ List gibbs_rtirt_null(const arma::mat& Y,
     sigma_t = draw_sigma_t(logT, xi, tau, slope_rt, delta_a, delta_b);
 
     // 6. 速度
-    tau = draw_tau(logT, xi, sigma_t, slope_rt, mu0, Sigma_p(1,1));
+    tau = draw_tau(logT, xi, sigma_t, slope_rt,
+                   cond_person_mean(mu0, mu0, theta, Sigma_p, 1),
+                   cond_person_var(Sigma_p, 1));
 
     if (m >= n_burnin) {
       post_theta.row(idx) = theta.t();
@@ -1214,14 +1234,16 @@ List gibbs_rtirt(const arma::mat& Y,
 
     arma::mat omega = draw_pg_irt(theta, a, b);
     arma::vec mu_theta = X * beta.col(0);
+    arma::vec mu_tau   = X * beta.col(1);
+    arma::vec mu_theta_c = cond_person_mean(mu_theta, mu_tau, tau, Sigma_p, 0);
+    double    v_theta_c  = cond_person_var(Sigma_p, 0);
     if (!one_pl && use_ab_mh) {
       List ab_mh = draw_ab_mh(Y, theta, a, b, mu_a, sigma_a, 0.0, 1.0,
                               prop_sd_loga_cur, prop_sd_b_cur);
       a = as<arma::vec>(ab_mh["a"]);
       b = as<arma::vec>(ab_mh["b"]);
       omega = draw_pg_irt(theta, a, b);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
       if (adaptive_mh && m < n_burnin && adapt_every > 0 && (m + 1) % adapt_every == 0) {
         double acc = as<double>(ab_mh["accept_rate"]);
         double gamma = 1.0 / std::sqrt(1.0 + adapt_count);
@@ -1234,7 +1256,7 @@ List gibbs_rtirt(const arma::mat& Y,
       if (m >= n_burnin) post_acc_ab[idx] = as<double>(ab_mh["accept_rate"]);
     } else if (!one_pl) {
       List ab = draw_ab_collapsed(kappa, omega, theta, a, b,
-                                   mu_theta, Sigma_p(0,0),
+                                   mu_theta_c, v_theta_c,
                                    mu_a, sigma_a, 0.0, 1.0, n_inner);
       a     = as<arma::vec>(ab["a"]);
       b     = as<arma::vec>(ab["b"]);
@@ -1242,8 +1264,7 @@ List gibbs_rtirt(const arma::mat& Y,
       omega = as<arma::mat>(ab["omega"]);
     } else {
       b = draw_b(kappa, omega, theta, a, 0.0, 1.0);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
     }
 
     xi      = draw_xi(logT, tau, slope_rt, sigma_t, mu_xi_use, sigma_xi);
@@ -1268,8 +1289,9 @@ List gibbs_rtirt(const arma::mat& Y,
     }
     sigma_t = draw_sigma_t(logT, xi, tau, slope_rt, delta_a, delta_b);
 
-    arma::vec mu_tau = X * beta.col(1);
-    tau = draw_tau(logT, xi, sigma_t, slope_rt, mu_tau, Sigma_p(1,1));
+    tau = draw_tau(logT, xi, sigma_t, slope_rt,
+                   cond_person_mean(mu_tau, mu_theta, theta, Sigma_p, 1),
+                   cond_person_var(Sigma_p, 1));
 
     if (m >= n_burnin) {
       post_theta.row(idx) = theta.t();
@@ -1374,7 +1396,6 @@ List gibbs_ml_irt(const arma::mat& Y,
       b = as<arma::vec>(ab_mh["b"]);
       omega = draw_pg_irt(theta, a, b);
       theta = draw_theta(kappa, omega, a, b, mu_theta, 1.0);
-      theta -= arma::mean(theta);
       if (adaptive_mh && m < n_burnin && adapt_every > 0 && (m + 1) % adapt_every == 0) {
         double acc = as<double>(ab_mh["accept_rate"]);
         double gamma = 1.0 / std::sqrt(1.0 + adapt_count);
@@ -1396,7 +1417,6 @@ List gibbs_ml_irt(const arma::mat& Y,
     } else {
       b = draw_b(kappa, omega, theta, a, 0.0, 1.0);
       theta = draw_theta(kappa, omega, a, b, mu_theta, 1.0);
-      theta -= arma::mean(theta);
     }
 
     if (m >= n_burnin) {
@@ -1506,13 +1526,15 @@ List gibbs_rtirt_quantile(const arma::mat& Y,
 
     arma::mat omega = draw_pg_irt(theta, a, b);
     arma::vec mu_theta = X * beta.col(0);
+    arma::vec mu_tau   = X * beta.col(1);
+    arma::vec mu_theta_c = cond_person_mean(mu_theta, mu_tau, tau, Sigma_p, 0);
+    double    v_theta_c  = cond_person_var(Sigma_p, 0);
     if (!one_pl && use_ab_mh) {
       List ab_mh = draw_ab_mh(Y, theta, a, b, mu_a, sigma_a, 0.0, 1.0,
                               prop_sd_loga_cur, prop_sd_b_cur);
       a = as<arma::vec>(ab_mh["a"]); b = as<arma::vec>(ab_mh["b"]);
       omega = draw_pg_irt(theta, a, b);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
       if (adaptive_mh && m < n_burnin && adapt_every > 0 && (m + 1) % adapt_every == 0) {
         double acc = as<double>(ab_mh["accept_rate"]);
         double gamma = 1.0 / std::sqrt(1.0 + adapt_count);
@@ -1525,14 +1547,13 @@ List gibbs_rtirt_quantile(const arma::mat& Y,
       if (m >= n_burnin) post_acc_ab[idx] = as<double>(ab_mh["accept_rate"]);
     } else if (!one_pl) {
       List ab = draw_ab_collapsed(kappa, omega, theta, a, b,
-                                  mu_theta, Sigma_p(0,0),
+                                  mu_theta_c, v_theta_c,
                                   mu_a, sigma_a, 0.0, 1.0, n_inner);
       a = as<arma::vec>(ab["a"]); b = as<arma::vec>(ab["b"]);
       theta = as<arma::vec>(ab["theta"]);
     } else {
       b = draw_b(kappa, omega, theta, a, 0.0, 1.0);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
     }
     if (standardize_theta && !one_pl) identify_theta_scale(theta, a, b);
 
@@ -1559,8 +1580,9 @@ List gibbs_rtirt_quantile(const arma::mat& Y,
       }
     }
     sigma_t = draw_sigma_t(logT, xi, tau, slope_rt, delta_a, delta_b);
-    arma::vec mu_tau = X * beta.col(1);
-    tau = draw_tau_qr(logT, xi, sigma_t, slope_rt, nu_rt, mu_tau, Sigma_p(1,1), q_rt);
+    tau = draw_tau_qr(logT, xi, sigma_t, slope_rt, nu_rt,
+                      cond_person_mean(mu_tau, mu_theta, theta, Sigma_p, 1),
+                      cond_person_var(Sigma_p, 1), q_rt);
 
     if (m >= n_burnin) {
       post_theta.row(idx) = theta.t(); post_tau.row(idx) = tau.t();
@@ -1676,13 +1698,15 @@ List gibbs_rtirt_cross_quantile(const arma::mat& Y,
 
     arma::mat omega = draw_pg_irt(theta, a, b);
     arma::vec mu_theta = X * beta.col(0);
+    arma::vec mu_tau   = X * beta.col(1);
+    arma::vec mu_theta_c = cond_person_mean(mu_theta, mu_tau, tau, Sigma_p, 0);
+    double    v_theta_c  = cond_person_var(Sigma_p, 0);
     if (!one_pl && use_ab_mh) {
       List ab_mh = draw_ab_mh(Y, theta, a, b, mu_a, sigma_a, 0.0, 1.0,
                               prop_sd_loga_cur, prop_sd_b_cur);
       a = as<arma::vec>(ab_mh["a"]); b = as<arma::vec>(ab_mh["b"]);
       omega = draw_pg_irt(theta, a, b);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
       if (adaptive_mh && m < n_burnin && adapt_every > 0 && (m + 1) % adapt_every == 0) {
         double acc = as<double>(ab_mh["accept_rate"]);
         double gamma = 1.0 / std::sqrt(1.0 + adapt_count);
@@ -1695,14 +1719,13 @@ List gibbs_rtirt_cross_quantile(const arma::mat& Y,
       if (m >= n_burnin) post_acc_ab[idx] = as<double>(ab_mh["accept_rate"]);
     } else if (!one_pl) {
       List ab = draw_ab_collapsed(kappa, omega, theta, a, b,
-                                  mu_theta, Sigma_p(0,0),
+                                  mu_theta_c, v_theta_c,
                                   mu_a, sigma_a, 0.0, 1.0, n_inner);
       a = as<arma::vec>(ab["a"]); b = as<arma::vec>(ab["b"]);
       theta = as<arma::vec>(ab["theta"]);
     } else {
       b = draw_b(kappa, omega, theta, a, 0.0, 1.0);
-      theta = draw_theta(kappa, omega, a, b, mu_theta, Sigma_p(0,0));
-      theta -= arma::mean(theta);
+      theta = draw_theta(kappa, omega, a, b, mu_theta_c, v_theta_c);
     }
     if (standardize_theta && !one_pl) identify_theta_scale_cross(theta, a, b, rho_rt);
 
@@ -1732,8 +1755,9 @@ List gibbs_rtirt_cross_quantile(const arma::mat& Y,
     }
     rho_rt  = draw_rho_qr_cross(logT, xi, tau, theta, slope_rt, sigma_t, nu_rt, q_rt, mu_rho, sigma_rho);
     sigma_t = draw_sigma_t(logT, xi, tau, slope_rt, delta_a, delta_b);
-    arma::vec mu_tau = X * beta.col(1);
-    tau = draw_tau_qr_cross(logT, xi, theta, sigma_t, slope_rt, rho_rt, nu_rt, mu_tau, Sigma_p(1,1), q_rt);
+    tau = draw_tau_qr_cross(logT, xi, theta, sigma_t, slope_rt, rho_rt, nu_rt,
+                            cond_person_mean(mu_tau, mu_theta, theta, Sigma_p, 1),
+                            cond_person_var(Sigma_p, 1), q_rt);
 
     if (m >= n_burnin) {
       post_theta.row(idx) = theta.t(); post_tau.row(idx) = tau.t();
