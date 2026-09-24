@@ -1,4 +1,85 @@
-# Origo draft — semi-modular inference for RT-IRT
+# Origo — semi-modular inference for RT-IRT
+
+Status: **Argument Gate CLEAR** (see the gate block at the end). Earlier drafts and the reasons they
+did not clear are kept below the gate block for the record.
+
+## Gate block
+
+```
+═══════════════════════════════════════════════
+Argument Gate: CLEAR
+───────────────────────────────────────────────
+P  : Without a target-specific check on how much response-time information enters ability
+     estimation, analysts who compare groups with joint RT-IRT scores (group gaps in large-scale
+     assessments, RT-informed EAP scoring in CAT) will report gaps shifted by the groups' speed
+     differences: 0.07-0.13 SD for person-level speed differences on variables outside the
+     scoring model, and up to 0.2-0.44 SD when a group is slower on a few items (differential
+     response time), even for variables the hierarchical model conditions on. Precision criteria
+     (theta RMSE, reliability) favour the joint model in all of these cases, so the error is not
+     visible in the standard workflow.
+
+S  : Semi-modular RT-IRT (marginal tempering of the RT module, conditioning model for reporting
+     variables) with a target-specific choice of the influence parameter eta: the eta that
+     minimises the plug-in posterior risk of the target relative to the conditioned cut
+     posterior; plus a one-fit score-based screen for person-level speed drift along a covariate.
+
+E  : Empirical so-what chain (simulation). Finding: the risk rule keeps eta ≈ 0.6-0.8 when there
+     is no speed difference (theta RMSE 0.38-0.39 vs 0.44 for the cut) and drops to ≈ 0-0.13 under
+     person-level or item-level speed differences, with gap bias ≤ 0.013 (full model: 0.07-0.44)
+     and coverage .88-.96 (full: 0-.68). RT adds almost no precision to group gaps (posterior SD
+     0.042 vs 0.044). Consequence: the joint model's accuracy advantage does not certify group
+     comparisons, and a hierarchical conditioning model does not protect against item-level speed
+     differences. Decision: an analyst reporting a group comparison from joint RT-IRT scores
+     selects eta for that comparison with the risk rule and reports it (default: the cut when no
+     RT data or covariate is at hand); a program releasing scores for secondary analysis releases
+     response-only (cut) plausible values for group comparisons, because RT buys no gap precision
+     and post-hoc correction fails under differential response time.
+
+V  : O2 contribution (boundary condition on RT as collateral information + a procedure).
+     Core papers:
+       1. van der Linden, Klein Entink & Fox (2010, APM) — partial — reason: collateral RT
+          information improves accuracy when the speed model holds for everyone; group speed
+          differences and DRT turn that information into group bias.
+       2. Bolsinova & Tijmstra (2018, BJMSP) — partial/oppose — reason: precision gains are
+          real, but RMSE-type evaluation hides the group bias shown here.
+       3. Kern & Choe (2021, APM) — partial — reason: J-EAP is evaluated on individual accuracy;
+          its use for group comparisons needs the target-specific check.
+       4. Frazier, Nott et al. (2023/2025, JASA) — support/extend — reason: posterior-risk
+          selection of semi-modular posteriors; we give a plug-in, target-specific rule for a
+          latent-variable RT module and show when it is needed.
+       5. Levy (2024, JEBS; 2026, BJMSP) — support/extend — reason: measurement-preserving
+          (cut) multistage Bayesian IRT; we add graded feedback via eta and a data-driven choice,
+          and show the RT module needs it.
+     Context (not core): plausible-value conditioning bias for omitted variables is attenuation
+     (Monseur & Adams 2009; Bailey et al. 2023), whereas RT leakage is additive and survives
+     conditioning under DRT; real speed differences by gender and multilingual status
+     (Kapoor et al. 2024, JEM; Park et al. 2024, EMIP).
+     Field-level value: joint RT-IRT scoring is currently evaluated by precision alone; without
+     this paper, group comparisons made with RT-informed scores inherit speed differences
+     invisibly, and the hierarchical model's usual remedy (conditioning) does not remove them.
+───────────────────────────────────────────────
+Assumption audit (three weakest):
+  1. The conditioned cut is an unbiased reference for the target (IRT module and conditioning
+     model correct for that target) — (b) limitation; the same assumption as plausible values.
+  2. Post-selection coverage of the risk rule is .88-.94, slightly below nominal — (b) reported.
+  3. Simulation conditions (lognormal RT, one speed factor, n = 500, p = 10) — (b); an empirical
+     illustration (e.g. PISA 2018 multilingual-learner or gender gaps with log data) is the next
+     required piece for APM/JEM.
+  Resolved: Hausman rule dropped (oversized); post-hoc correction scoped out (fails under DRT).
+Weakest defended assumption: assumption 2 (post-selection coverage).
+Gilbert positioning: no duplication (Gilbert et al. 2026, EPM studies RT–discrimination, not RT
+  as collateral information for scores); closest contrast is Gilbert, Soland & Domingue (2026,
+  EMIP), which shows scoring decisions shift downstream inference — this paper supplies a
+  decision rule for one such scoring decision. Same O2 level.
+Journal: JEM (group comparisons / fairness framing, needs the empirical illustration) or APM.
+Next: empirical illustration, then mvp-writer for the theory scaffold.
+═══════════════════════════════════════════════
+```
+
+---
+
+# Earlier drafts (not cleared)
+
 
 Status: **Argument Gate NOT CLEAR** (see "Blocking issue"). Draft for discussion, not a fixed origo.
 

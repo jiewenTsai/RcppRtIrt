@@ -218,3 +218,41 @@ scores from the full fit, efficient score after G, ordered by Zc (power) or by a
 
 The screen needs one full fit per dataset (no eta grid) and finds both linear and threshold speed
 drifts; size is near .05.
+
+## Post-hoc leakage correction — `leakage.R`, `exp_leak_correction.R`
+
+The full model (eta = 1, G in both means) is fitted once; the secondary analyst gets draws of theta
+and of the speed residual u = tau - m_tau, and the leakage ratio c (Gaussian approximation,
+`leakage()`), and computes target(theta) - c * target(u) per draw. 50 datasets per scenario.
+
+| scenario | raw bias / cover | corrected bias / cover | cut bias / cover | RMSE raw / corr / cut |
+|---|---|---|---|---|
+| Z: no shift | -.005 / .96 | -.007 / .98 | -.008 / .96 | .035 / .040 / .040 |
+| Z slower .25 | .069 / .46 | -.006 / .96 | -.008 / .96 | .078 / .040 / .040 |
+| Z slower .5 | .121 / .14 | -.006 / .96 | -.008 / .96 | .128 / .040 / .040 |
+| Zc: none (slope) | -.001 / .98 | -.002 / .98 | -.001 / .96 | .016 / .017 / .018 |
+| Zc: linear | .062 / .06 | -.001 / .98 | -.001 / .96 | .064 / .017 / .018 |
+| Zc: threshold | .042 / .34 | -.002 / .98 | -.001 / .96 | .045 / .017 / .018 |
+| DRT: items 1-3 slower .5 for Z | .062 / .60 | .023 / .64 | -.008 / .96 | .090 / .080 / .040 |
+| DRT: items 1-3 slower 1 | .120 / .36 | .074 / .50 | -.008 / .96 | .153 / .132 / .040 |
+| Z slower .25 + DRT .5 | .135 / .22 | .032 / .66 | -.008 / .96 | .151 / .082 / .040 |
+| DRT 1, items 1-3 with gamma .8 | **.452 / 0** | **.464 / 0** | -.008 / .96 | .464 / .478 / .040 |
+
+The correction removes person-level speed leakage (binary or continuous, linear or threshold), but
+not differential response time (DRT): item-specific speed differences enter theta through gamma_j
+and are invisible to the person-level residual u. The correction is therefore not a safe general
+tool; it is reported as a negative result.
+
+## Risk rule under DRT — `exp_risk_coverage.R` (SCEN=DRT3x.5,DRT3x1_hi_gamma, 50 datasets)
+
+| target | scenario | cut | full | risk (mean eta) |
+|---|---|---|---|---|
+| G (in the model) | DRT .5 | .009 / .96 | .008 / .88 | .007 / .96 (.45) |
+| G (in the model) | DRT 1, high gamma | .009 / .96 | **.205 / .06** | .013 / .96 (.06) |
+| Z | DRT .5 | .002 / .96 | .047 / .68 | .006 / .94 (.37) |
+| Z | DRT 1, high gamma | .002 / .96 | **.439 / 0** | .002 / .96 (.00) |
+
+(bias / 95% coverage.) Under DRT on items whose RT carries more ability information, the full model
+biases even the G gap by 0.2 SD although G is in both conditioning means (Z is correlated with G):
+the hierarchical model does not protect against item-level speed differences. The risk rule, which
+compares each target with the conditioned cut, stays unbiased for both targets.
