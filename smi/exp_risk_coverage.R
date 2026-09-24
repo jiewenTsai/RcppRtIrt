@@ -8,13 +8,18 @@ suppressMessages(library(parallel))
 if (file.exists("../smi/smi_gibbs.R")) setwd("..")
 source("pxda/probit_da_gibbs.R"); source("smi/smi_gibbs.R"); source("smi/sim_smi.R")
 etas <- c(0, .1, .25, .5, .75, 1)
-scen <- c(none = 0, shiftZ25 = .25, shiftZ50 = .5)
-n_rep <- 100
+scen <- c(none = 0, shiftZ25 = .25, shiftZ50 = .5, DRT3x.5 = 0, DRT3x1_hi_gamma = 0)
+drt <- c(none = 0, shiftZ25 = 0, shiftZ50 = 0, DRT3x.5 = .5, DRT3x1_hi_gamma = 1)   # Z slower on items 1-3
+if (nzchar(Sys.getenv("SCEN"))) scen <- scen[strsplit(Sys.getenv("SCEN"), ",")[[1]]]
+n_rep <- if (nzchar(Sys.getenv("NREP"))) as.integer(Sys.getenv("NREP")) else 100
+out_tag <- Sys.getenv("OUT_TAG")
 jobs <- expand.grid(eta = etas, scen = names(scen), rep = 1:n_rep, stringsAsFactors = FALSE)
 fit_one <- function(k) {
   jb <- jobs[k, ]
   if (nzchar(Sys.getenv("SMI_PROGRESS"))) cat(k, "\n", file = Sys.getenv("SMI_PROGRESS"), append = TRUE)
-  dat <- sim_gz(seed = 2000 + jb$rep, shift_Z = scen[[jb$scen]])
+  dat <- sim_gz(seed = 2000 + jb$rep, shift_Z = scen[[jb$scen]],
+                drt_items = if (drt[[jb$scen]] > 0) 1:3 else integer(0), drt_shift = drt[[jb$scen]],
+                gam = if (grepl("hi_gamma", jb$scen)) c(.8, .8, .8, rep(.5, 7)) else .5)
   X <- cbind(G = dat$G - mean(dat$G))
   fit <- smi_rtirt(dat$Y, dat$logT, eta = jb$eta, n_iter = 2000, n_burn = 500, seed = jb$rep,
                    temper = "marginal", Xth = X, Xtau = if (jb$eta > 0) X else NULL)
@@ -31,7 +36,7 @@ t0 <- proc.time()[3]
 fits <- mclapply(seq_len(nrow(jobs)), function(k) tryCatch(fit_one(k), error = function(e) {
   message("job ", k, ": ", conditionMessage(e)); NULL }), mc.cores = 4)
 cat("elapsed", round(proc.time()[3] - t0), "s; failed", sum(sapply(fits, is.null)), "\n")
-saveRDS(fits, "smi/exp_risk_coverage_fits.rds")
+saveRDS(fits, paste0("smi/exp_risk_coverage", out_tag, "_fits.rds"))
 
 rows <- list()
 for (sc in names(scen)) for (r in 1:n_rep) {
@@ -54,7 +59,7 @@ for (sc in names(scen)) for (r in 1:n_rep) {
   }
 }
 out <- do.call(rbind, rows)
-saveRDS(out, "smi/exp_risk_coverage_results.rds")
+saveRDS(out, paste0("smi/exp_risk_coverage", out_tag, "_results.rds"))
 summ <- aggregate(cbind(eta, bias = err, cover, width, theta_rmse) ~ target + scen + rule, out, mean)
 summ$rmse <- aggregate(err ~ target + scen + rule, out, function(x) sqrt(mean(x^2)))$err
 summ$n <- aggregate(err ~ target + scen + rule, out, length)$err
