@@ -16,9 +16,10 @@ sim_smi <- function(n = 500, p = 15, seed = 1, gam_A = 0.3, gam_B = 0.3, gam_sd 
 }
 
 # sim_gz — reporting group G with a true ability gap gap_G; Z correlated with G (P(Z=1|G) = .3/.7)
-# with no ability effect. Speed shifts: Z = 1 slower by shift_Z, G = 1 slower by shift_G (in tau).
+# with no ability effect. Speed shifts: Z = 1 slower by shift_Z, G = 1 slower by shift_G (in tau);
+# differential response time (DRT): Z = 1 slower by drt_shift on items drt_items only.
 sim_gz <- function(n = 500, p = 10, seed = 1, gap_G = .3, shift_Z = .5, gam = .5, v = .15,
-                   shift_G = 0) {
+                   shift_G = 0, drt_items = integer(0), drt_shift = 0) {
   set.seed(seed)
   a <- runif(p, .7, 1.5); d <- rnorm(p, 0, .6); xi <- rnorm(p, 4, .2); s <- runif(p, .3, .6)
   g <- rnorm(p, gam, .1)
@@ -27,6 +28,7 @@ sim_gz <- function(n = 500, p = 10, seed = 1, gap_G = .3, shift_Z = .5, gam = .5
   tau <- rnorm(n, 0, sqrt(v)) - shift_Z * Z - shift_G * G
   Y <- matrix(rbinom(n * p, 1, pnorm(outer(th, a) - rep(1, n) %o% d)), n)
   logT <- matrix(xi, n, p, byrow = TRUE) - tau + outer(th, g) + matrix(rnorm(n * p), n) %*% diag(s)
+  if (length(drt_items)) logT[, drt_items] <- logT[, drt_items] + drt_shift * Z   # item-specific (DRT)
   list(Y = Y, logT = logT, theta = th, G = G, Z = Z)
 }
 
