@@ -121,3 +121,33 @@ error at shift 0 (.023) comes from the item-level gamma differences between grou
   values drawn without the secondary variable in the conditioning model would. SMI therefore trades
   two errors: high eta biases group comparisons of theta when one group is slower; low eta
   attenuates the speed–ability relation.
+
+## Cut vs hierarchical (conditioning) model — `exp_hier_vs_cut.R`
+
+n = 500, p = 10, 20 datasets. G: reporting group with a true ability gap of 0.3 SD. Z: correlated
+with G (P(Z=1|G) = .3/.7), no ability effect, Z = 1 slower by `shift` in tau. "+G" puts G in the
+theta mean (and, for full, the tau mean); "+GZ" puts both. Bias and RMSE of the posterior-mean
+theta gap by G and by Z; cov = 95% interval coverage.
+
+| shift | method | bias G | bias Z | cov G | cov Z | RMSE G | RMSE Z | theta RMSE |
+|---|---|---|---|---|---|---|---|---|
+| 0 | full | -0.043 | 0.004 | .75 | .95 | 0.055 | 0.031 | 0.37 |
+| 0 | full+G | -0.004 | 0.019 | .95 | .95 | 0.040 | 0.038 | 0.37 |
+| 0 | cut | -0.055 | -0.001 | .70 | .90 | 0.068 | 0.038 | 0.44 |
+| 0 | cut+G | 0.003 | 0.021 | .95 | .85 | 0.039 | 0.043 | 0.44 |
+| 0.5 | full | 0.011 | 0.150 | .85 | .00 | 0.036 | 0.154 | 0.38 |
+| 0.5 | full+G | -0.003 | 0.147 | .95 | .00 | 0.039 | 0.150 | 0.38 |
+| 0.5 | full+GZ | -0.004 | 0.019 | .95 | .80 | 0.040 | 0.048 | 0.37 |
+| 0.5 | cut | -0.055 | -0.001 | .70 | .90 | 0.068 | 0.038 | 0.44 |
+| 0.5 | cut+G | 0.003 | 0.021 | .95 | .85 | 0.039 | 0.043 | 0.44 |
+
+(cut rows do not depend on the shift: the cut never sees RT.)
+
+- Without a conditioning model both full and cut shrink a real group gap (cut by about 1 − reliability).
+  So the cut is an unbiased reference for a gap only when theta's prior conditions on that grouping;
+  the eta rules in `exp_choose_eta.R` were run with a true gap of 0 and must be redone with `Xth`.
+- For a variable in the model (G), the hierarchical full model is unbiased and matches the cut in
+  gap RMSE. The RT precision gain for individual theta (0.37 vs 0.44) does not carry over to group
+  means (posterior SD of the G gap 0.042 vs 0.044).
+- For a speed-related variable left out of the RT model (Z), full+G is biased by 0.15 SD with 0%
+  coverage; cut+G is not. Only the oracle full+GZ fixes it.
