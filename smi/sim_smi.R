@@ -1,6 +1,7 @@
 # sim_smi.R — two groups with equal ability distributions. gamma may differ by group and group B
 # may be slower overall (tau shifted down); the fitted model assumes one gamma and one speed
-# distribution for everyone.
+# distribution for everyone. gamma_j is drawn separately for each group (gam_sd around the group
+# mean), so even with gam_A == gam_B the two groups differ item by item (mild heterogeneity).
 sim_smi <- function(n = 500, p = 15, seed = 1, gam_A = 0.3, gam_B = 0.3, gam_sd = 0.1, v = 0.3,
                     tau_shift_B = 0) {
   set.seed(seed)

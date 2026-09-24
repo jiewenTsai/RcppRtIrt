@@ -32,8 +32,9 @@ if (!exists("rtnorm_side")) source("pxda/probit_da_gibbs.R")
 
 smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0,
                       zscale_px = TRUE, seed = 1, keep_theta = TRUE,
-                      temper = c("likelihood", "marginal")) {
+                      temper = c("likelihood", "marginal"), use_cpp = FALSE) {
   temper <- match.arg(temper)
+  if (use_cpp && !exists("rt_sweeps_cpp")) Rcpp::sourceCpp("smi/rt_sweeps.cpp")
   set.seed(seed)
   n <- nrow(Y); p <- ncol(Y)
   a <- rep(1, p); d <- rep(0, p); th <- rep(0, n)
@@ -118,9 +119,14 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
 
     ## ---- stage 2: psi | theta, T (full likelihood), nested ---------------------
     if (K_inner > 0) {
-      for (k in 1:K_inner) {
-        rb2 <- rt_block(th, tau2, xi2, gam2, s22, v2, 1)
+      if (use_cpp) {
+        rb2 <- rt_sweeps_cpp(th, logT, tau2, xi2, gam2, s22, v2, K_inner)
         tau2 <- rb2$tau; xi2 <- rb2$xi; gam2 <- rb2$gam; s22 <- rb2$s2; v2 <- rb2$v
+      } else {
+        for (k in 1:K_inner) {
+          rb2 <- rt_block(th, tau2, xi2, gam2, s22, v2, 1)
+          tau2 <- rb2$tau; xi2 <- rb2$xi; gam2 <- rb2$gam; s22 <- rb2$s2; v2 <- rb2$v
+        }
       }
     }
     if (it > n_burn) {
