@@ -69,6 +69,19 @@ cut, underestimates the speed–ability link, and neither error is visible to RM
    speed–ability relation.
 Also assumed: the trusted IRT module is correct (b).
 
+## Update after `exp_hier_vs_cut.R` and `exp_choose_eta_cond.R`
+
+- The cut is an unbiased reference for a group gap only when theta's prior conditions on that
+  grouping (conditioning model). The eta rules are now run relative to cut+G.
+- A hierarchical model with G in the theta and tau means is unbiased for G; the cut's added value
+  is protection for comparisons on variables that are not in the RT model (secondary analyses).
+- Risk rule: works for both targets (keeps eta ≈ 0.75 without misspecification, drops to ≈ 0.03
+  under a Z speed shift). Hausman rule: oversized under the null (stops at eta = 0 in ~half of the
+  datasets), because of Monte Carlo error at small eta. Drop it or correct it for MC error.
+- Revised P candidate: RT-informed scores are reused for comparisons on variables the scoring
+  model did not condition on; the joint model then leaks speed differences on those variables into
+  ability, and no conditioning model can include every future analysis variable.
+
 ## Blocking issue
 
 Assumption 2 is (c). Required revision: a null-scenario size study of the Hausman rule and a

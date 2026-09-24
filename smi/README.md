@@ -151,3 +151,32 @@ theta gap by G and by Z; cov = 95% interval coverage.
   means (posterior SD of the G gap 0.042 vs 0.044).
 - For a speed-related variable left out of the RT model (Z), full+G is biased by 0.15 SD with 0%
   coverage; cut+G is not. Only the oracle full+GZ fixes it.
+
+## eta rules with a conditioning model — `exp_choose_eta_cond.R`
+
+Same data generator as above (`sim_gz`, true G gap 0.3 SD), 20 datasets per scenario, marginal
+tempering, G in the theta mean and the tau mean at every eta; reference = cut+G. Rules applied per
+target (gap by G, gap by Z). shiftG: G = 1 slower by 0.5; shiftZ: Z = 1 slower by 0.5.
+
+| target | scenario | rule | mean eta | bias | 95% cover | gap RMSE | theta RMSE |
+|---|---|---|---|---|---|---|---|
+| G | none | cut / full | 0 / 1 | -0.003 / -0.015 | .90 / .90 | 0.047 / 0.048 | 0.44 / 0.37 |
+| G | none | risk / hausman | 0.54 / 0.35 | -0.010 / -0.009 | .90 / .90 | 0.046 / 0.047 | 0.39 / 0.41 |
+| G | shiftZ | full | 1 | -0.014 | .90 | 0.048 | 0.38 |
+| G | shiftZ | risk / hausman | 0.63 / 0.31 | -0.009 / -0.009 | .90 / .90 | 0.046 / 0.049 | 0.40 / 0.42 |
+| Z | none | cut / full | 0 / 1 | 0.003 / -0.002 | 1 / 1 | 0.038 / 0.033 | 0.44 / 0.37 |
+| Z | none | risk / hausman | 0.79 / 0.56 | -0.002 / 0.000 | 1 / 1 | 0.035 / 0.035 | 0.38 / 0.40 |
+| Z | shiftG | risk / hausman | 0.74 / 0.39 | 0.000 / -0.002 | 1 / 1 | 0.035 / 0.036 | 0.38 / 0.41 |
+| Z | shiftZ | full | 1 | **0.121** | **.05** | 0.127 | 0.38 |
+| Z | shiftZ | risk / hausman | 0.03 / 0.08 | 0.004 / 0.008 | 1 / .95 | 0.038 / 0.040 | 0.44 / 0.43 |
+
+- With G in both means, every eta is unbiased for the G gap, including under a Z speed shift (the
+  part of the Z shift that runs through G is absorbed by beta_tau). The group-gap RMSE is the same
+  for all eta (≈ 0.047), so RT buys no precision for the G gap.
+- For Z (not in the model) the risk rule does what it should: eta ≈ 0.74–0.79 when no Z shift is
+  present (theta RMSE 0.38), eta ≈ 0.03 under the Z shift (bias 0.004 vs 0.121 for full, coverage
+  1 vs .05).
+- The Hausman rule is too conservative: with no misspecification it stops at eta = 0 in 10/20
+  (G) and 8/20 (Z) datasets. At small eta both D and V(0) − V(eta) are of the order of the Monte
+  Carlo error of the posterior summaries, so H is dominated by that error. Use the risk rule, or a
+  Hausman test that accounts for MC error.
