@@ -20,8 +20,10 @@
 # z and log T are unchanged by both moves, so only prior terms enter the acceptance ratio.
 
 rtnorm_side <- function(mu, y) {           # z ~ N(mu, 1) truncated to z > 0 (y = 1) or z < 0
-  u <- runif(length(mu))
-  ifelse(y == 1, mu - qnorm(u * pnorm(mu)), mu + qnorm(u * pnorm(-mu)))
+  # inverse CDF on the log scale, so extreme mu does not underflow to +-Inf
+  lu <- log(runif(length(mu)))
+  s <- ifelse(y == 1, 1, -1)
+  mu - s * qnorm(lu + pnorm(s * mu, log.p = TRUE), log.p = TRUE)
 }
 
 slice1 <- function(x0, logf, width = 1, max_steps = 50) {   # univariate slice sampler (Neal 2003)
@@ -49,6 +51,7 @@ zscale_move <- function(z, X, P0, m0, V) {
   Xz <- crossprod(X, z); Xc <- crossprod(X, cc)
   A <- sum(z^2) - drop(t(Xz) %*% V %*% Xz)
   B <- sum(z * cc) - drop(t(Xz) %*% V %*% Xc)
+  if (!is.finite(A) || !is.finite(B) || A <= 0) return(1)
   g_new <- sqrt(rgamma(1, n / 2, A / 2))
   if (log(runif(1)) < B * (g_new - 1)) g_new else 1
 }
