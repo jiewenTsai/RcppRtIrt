@@ -11,11 +11,16 @@
 #   only the RT likelihood is tempered; the prior of tau is not. eta = 0 gives the cut posterior
 #   for phi (tau~ then follows its prior and carries no information about theta), eta = 1 the
 #   full posterior. Every conditional stays conjugate; the RT precision terms are multiplied by eta.
-# Not offered: raising the whole suspect module, [p(T | tau, theta, ...) p(tau | v)]^eta, to the
-#   power eta. Integrating tau out of [N(tau; 0, v)]^eta leaves a factor v^((1 - eta)/2) per person,
-#   so the auxiliary target is improper in v for eta < 1 (v drifts to infinity). A graded version
-#   has to temper the marginal RT likelihood p(T | theta, psi)^eta instead; with tau as a latent
-#   variable that needs an extra MH correction |Omega|^(n (1 - eta) / 2) for (sigma^2, v).
+# temper = "marginal" raises the marginal RT likelihood L_i = N(T_i; xi + gamma theta_i, Omega),
+#   Omega = diag(sigma^2) + v 11' (tau integrated out), to the power eta. It is sampled with the
+#   augmentation tau~_i ~ N(0, v / eta), T_i | tau~ ~ N(xi - tau~ + gamma theta_i, diag(sigma^2) / eta),
+#   whose tau~-integral is N(T_i; mu_i, Omega / eta) = const * L_i^eta * |Omega|^(-(1 - eta)/2)
+#   (check_marginal_identity.R), so the augmented target carries the correction |Omega|^(n (1-eta)/2),
+#   |Omega| = prod sigma_j^2 (1 + v sum_j 1/sigma_j^2). tau~, theta, (xi, gamma) stay conjugate;
+#   sigma_j^2 and v are drawn by univariate slice sampling on the log scale. eta = 0 is the cut.
+# Not offered: raising the whole module with the tau prior as a density, [p(T | tau, ...) p(tau | v)]^eta.
+#   Integrating tau out of [N(tau; 0, v)]^eta leaves v^((1 - eta)/2) per person, so the auxiliary
+#   target is improper in v for eta < 1.
 # Stage 2 draws psi ~ p(psi | phi, T) (eta = 1) by K_inner Gibbs sweeps per outer iteration,
 #   warm-started from the previous psi (nested MCMC; exact as K_inner -> infinity).
 #
@@ -26,7 +31,9 @@
 if (!exists("rtnorm_side")) source("pxda/probit_da_gibbs.R")
 
 smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0,
-                      zscale_px = TRUE, seed = 1, keep_theta = TRUE) {
+                      zscale_px = TRUE, seed = 1, keep_theta = TRUE,
+                      temper = c("likelihood", "marginal")) {
+  temper <- match.arg(temper)
   set.seed(seed)
   n <- nrow(Y); p <- ncol(Y)
   a <- rep(1, p); d <- rep(0, p); th <- rep(0, n)
@@ -59,6 +66,34 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     list(tau = tau, xi = xi, gam = gam, s2 = s2, v = v)
   }
 
+  rt_block_marginal <- function(th, tau, xi, gam, s2, v, eta) {
+    # one sweep under the marginally tempered RT module (see header)
+    w <- 1 / s2
+    prec_tau <- eta / v + eta * sum(w)
+    rhs <- eta * drop((matrix(xi, n, p, byrow = TRUE) + outer(th, gam) - logT) %*% w)
+    tau <- rhs / prec_tau + rnorm(n) / sqrt(prec_tau)
+    W <- cbind(1, th); WtW <- crossprod(W); Wty <- crossprod(W, logT + tau)
+    for (j in 1:p) {
+      Vj <- solve(P0xg + eta * WtW / s2[j])
+      mj <- Vj %*% (P0xg %*% m0xg + eta * Wty[, j] / s2[j])
+      xg <- mj + t(chol(Vj)) %*% rnorm(2)
+      xi[j] <- xg[1]; gam[j] <- xg[2]
+    }
+    E <- logT - (matrix(xi, n, p, byrow = TRUE) - tau + outer(th, gam))
+    SSR <- colSums(E^2)
+    kpow <- n * (1 - eta) / 2
+    for (j in 1:p) {        # sigma_j^2: IG(1 + eta n/2, 1 + eta SSR_j/2) x (1 + v sum_k 1/sigma_k^2)^kpow
+      S_other <- sum(1 / s2[-j])
+      lf <- function(u) -(1 + eta * n / 2) * u - (1 + eta * SSR[j] / 2) * exp(-u) +
+        kpow * log1p(v * (S_other + exp(-u)))
+      s2[j] <- exp(slice1(log(s2[j]), lf, width = 0.5))
+    }
+    S <- sum(1 / s2)        # v: IG(1 + n/2, 1 + eta sum tau~^2 / 2) x (1 + v S)^kpow
+    lv <- function(u) -(1 + n / 2) * u - (1 + eta * sum(tau^2) / 2) * exp(-u) + kpow * log1p(exp(u) * S)
+    v <- exp(slice1(log(v), lv, width = 0.5))
+    list(tau = tau, xi = xi, gam = gam, s2 = s2, v = v)
+  }
+
   for (it in 1:n_iter) {
     ## ---- stage 1 --------------------------------------------------------------
     Z <- matrix(rtnorm_side(outer(th, a) - matrix(d, n, p, byrow = TRUE), Y), n, p)
@@ -74,9 +109,12 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     Mad <- Vad %*% (drop(P0ad %*% m0ad) + crossprod(X, Z))
     AD <- Mad + t(chol(Vad)) %*% matrix(rnorm(2 * p), 2)
     a <- AD[1, ]; d <- AD[2, ]
-    # auxiliary RT parameters psi~ under the tempered likelihood
-    rb <- rt_block(th, tau, xi, gam, s2, v, eta)
-    tau <- rb$tau; xi <- rb$xi; gam <- rb$gam; s2 <- rb$s2; v <- rb$v
+    # auxiliary RT parameters psi~ under the tempered module (skipped at eta = 0: pure cut)
+    if (eta > 0) {
+      rb <- if (temper == "marginal") rt_block_marginal(th, tau, xi, gam, s2, v, eta) else
+        rt_block(th, tau, xi, gam, s2, v, eta)
+      tau <- rb$tau; xi <- rb$xi; gam <- rb$gam; s2 <- rb$s2; v <- rb$v
+    }
 
     ## ---- stage 2: psi | theta, T (full likelihood), nested ---------------------
     if (K_inner > 0) {

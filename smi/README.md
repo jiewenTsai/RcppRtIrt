@@ -39,3 +39,33 @@ the error in the estimated B - A ability gap.
   theta that passes through tau is capped by the speed variance v, so eta is a nonlinear dial.
 - Tempering the whole module including the tau prior is improper for eta < 1 (see the header of
   `smi_gibbs.R`); a graded version has to temper the marginal RT likelihood.
+
+## Marginal tempering (`temper = "marginal"`)
+
+Raises the marginal RT likelihood N(T_i; xi + gamma theta_i, Omega), Omega = diag(sigma^2) + v 11',
+to the power eta, via tau~ ~ N(0, v/eta), T | tau~ ~ N(., diag(sigma^2)/eta) plus the correction
+|Omega|^(n(1-eta)/2); sigma^2 and v by log-scale slice sampling.
+
+- `check_marginal_identity.R`: the tau~-integral differs from eta * log L_i by a constant
+  (spread 3.6e-15 over random parameter draws); determinant lemma exact.
+- `check_marginal_sampler.R`: n = 80, p = 4, eta = .3, 55k draws each, against an independent
+  sampler that never introduces tau~ (Gaussian theta conditional under the tempered marginal,
+  random-walk MH on xi, gamma, log sigma^2, log v). Quantiles of theta_1, theta_2, a_1 agree to
+  <= .03; v and gamma_1 medians differ by .005 and .015 (≈ .07 posterior SD).
+- `exp_temper_compare.R`: same design as `exp_temper.R`. info_frac = share of the cut-to-full gain
+  in mean posterior precision of theta.
+
+| eta | info_frac likelihood | info_frac marginal | gap_bias likelihood (shift .5) | gap_bias marginal (shift .5) |
+|---|---|---|---|---|
+| 0 | 0 | 0 | .048 | .048 |
+| .05 | .13 | .06 | .076 | .052 |
+| .10 | .29 | .08 | .110 | .058 |
+| .25 | .71 | .19 | .188 | .073 |
+| .50 | .90 | .38 | .196 | .105 |
+| .75 | .97 | .63 | .192 | .145 |
+| 1 | 1 | 1 | .190 | .191 |
+
+Marginal tempering turns eta into a graded dial (information borrowed rises roughly in step with
+eta, slightly convex), whereas likelihood tempering passes ~70% of the information by eta = .25.
+At matched information the two give similar bias (e.g. info ≈ .3–.4: gap bias ≈ .11 for both), so
+the choice mainly changes how eta maps to borrowing, not the bias–information frontier.
