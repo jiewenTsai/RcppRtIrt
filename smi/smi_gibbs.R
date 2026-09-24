@@ -28,7 +28,9 @@
 #         v ~ IG(1, 1).
 # Optional person covariates (hierarchical / conditioning model; no intercept column, centre them):
 #   Xth:  theta_i ~ N(Xth_i beta_th, 1);   Xtau: tau_i ~ N(Xtau_i beta_tau, v);   beta ~ N(0, 10 I).
-#   Xtau is available with temper = "likelihood" (or eta in {0, 1}) and without stage 2.
+#   Xtau needs K_inner = 0. Under temper = "marginal" the augmentation becomes
+#   tau~_i ~ N(Xtau_i beta_tau, v / eta), so the marginal is L_i^eta with mean xi - Xtau_i beta_tau
+#   + gamma theta_i and the |Omega| correction is unchanged; beta_tau | tau~ uses variance v / eta.
 
 # Requires rtnorm_side() and zscale_move(); run from the repository root.
 if (!exists("rtnorm_side")) source("pxda/probit_da_gibbs.R")
@@ -38,9 +40,7 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
                       temper = c("likelihood", "marginal"), use_cpp = FALSE,
                       Xth = NULL, Xtau = NULL) {
   temper <- match.arg(temper)
-  if (!is.null(Xtau) && (K_inner > 0 || (temper == "marginal" && eta > 0 && eta < 1)))
-    stop("Xtau needs temper = 'likelihood' (or eta in {0, 1}) and K_inner = 0")
-  if (!is.null(Xtau) && temper == "marginal") temper <- "likelihood"   # identical at eta in {0, 1}
+  if (!is.null(Xtau) && K_inner > 0) stop("Xtau needs K_inner = 0")
   if (use_cpp && !exists("rt_sweeps_cpp")) Rcpp::sourceCpp("smi/rt_sweeps.cpp")
   set.seed(seed)
   n <- nrow(Y); p <- ncol(Y)
@@ -85,11 +85,11 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     list(tau = tau, xi = xi, gam = gam, s2 = s2, v = v)
   }
 
-  rt_block_marginal <- function(th, tau, xi, gam, s2, v, eta) {
+  rt_block_marginal <- function(th, tau, xi, gam, s2, v, eta, m_tau = 0) {
     # one sweep under the marginally tempered RT module (see header)
     w <- 1 / s2
     prec_tau <- eta / v + eta * sum(w)
-    rhs <- eta * drop((matrix(xi, n, p, byrow = TRUE) + outer(th, gam) - logT) %*% w)
+    rhs <- eta * drop((matrix(xi, n, p, byrow = TRUE) + outer(th, gam) - logT) %*% w) + eta * m_tau / v
     tau <- rhs / prec_tau + rnorm(n) / sqrt(prec_tau)
     W <- cbind(1, th); WtW <- crossprod(W); Wty <- crossprod(W, logT + tau)
     for (j in 1:p) {
@@ -108,7 +108,8 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
       s2[j] <- exp(slice1(log(s2[j]), lf, width = 0.5))
     }
     S <- sum(1 / s2)        # v: IG(1 + n/2, 1 + eta sum tau~^2 / 2) x (1 + v S)^kpow
-    lv <- function(u) -(1 + n / 2) * u - (1 + eta * sum(tau^2) / 2) * exp(-u) + kpow * log1p(exp(u) * S)
+    ss_tau <- sum((tau - m_tau)^2)
+    lv <- function(u) -(1 + n / 2) * u - (1 + eta * ss_tau / 2) * exp(-u) + kpow * log1p(exp(u) * S)
     v <- exp(slice1(log(v), lv, width = 0.5))
     list(tau = tau, xi = xi, gam = gam, s2 = s2, v = v)
   }
@@ -131,10 +132,10 @@ smi_rtirt <- function(Y, logT, eta = 1, n_iter = 3000, n_burn = 500, K_inner = 0
     a <- AD[1, ]; d <- AD[2, ]
     # auxiliary RT parameters psi~ under the tempered module (skipped at eta = 0: pure cut)
     if (eta > 0) {
-      rb <- if (temper == "marginal") rt_block_marginal(th, tau, xi, gam, s2, v, eta) else
+      rb <- if (temper == "marginal") rt_block_marginal(th, tau, xi, gam, s2, v, eta, m_tau) else
         rt_block(th, tau, xi, gam, s2, v, eta, m_tau = m_tau)
       tau <- rb$tau; xi <- rb$xi; gam <- rb$gam; s2 <- rb$s2; v <- rb$v
-      if (!is.null(Xtau)) { b_tau <- draw_beta(Xtau, tau, v); m_tau <- drop(Xtau %*% b_tau) }
+      if (!is.null(Xtau)) { b_tau <- draw_beta(Xtau, tau, if (temper == "marginal") v / eta else v); m_tau <- drop(Xtau %*% b_tau) }
     }
 
     ## ---- stage 2: psi | theta, T (full likelihood), nested ---------------------

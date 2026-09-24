@@ -8,19 +8,7 @@
 #   full+GZ     : G, Z in both         cut+GZ     : G, Z in theta
 suppressMessages(library(parallel))
 if (file.exists("../smi/smi_gibbs.R")) setwd("..")
-source("pxda/probit_da_gibbs.R"); source("smi/smi_gibbs.R")
-
-sim_gz <- function(n = 500, p = 10, seed = 1, gap_G = .3, shift_Z = .5, gam = .5, v = .15) {
-  set.seed(seed)
-  a <- runif(p, .7, 1.5); d <- rnorm(p, 0, .6); xi <- rnorm(p, 4, .2); s <- runif(p, .3, .6)
-  g <- rnorm(p, gam, .1)
-  G <- rbinom(n, 1, .5); Z <- rbinom(n, 1, ifelse(G == 1, .7, .3))
-  th <- rnorm(n) + gap_G * (G - .5)
-  tau <- rnorm(n, 0, sqrt(v)) - shift_Z * Z
-  Y <- matrix(rbinom(n * p, 1, pnorm(outer(th, a) - rep(1, n) %o% d)), n)
-  logT <- matrix(xi, n, p, byrow = TRUE) - tau + outer(th, g) + matrix(rnorm(n * p), n) %*% diag(s)
-  list(Y = Y, logT = logT, theta = th, G = G, Z = Z)
-}
+source("pxda/probit_da_gibbs.R"); source("smi/smi_gibbs.R"); source("smi/sim_smi.R")
 
 methods <- data.frame(name = c("full", "full+G", "full+GZ", "cut", "cut+G", "cut+GZ"),
                       eta = c(1, 1, 1, 0, 0, 0), cov = c("", "G", "GZ", "", "G", "GZ"))
