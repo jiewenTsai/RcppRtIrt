@@ -18,6 +18,14 @@ APT_PKGS=(
   r-cran-coda
   r-cran-testthat
   r-cran-lintr
+  # aghq / score-based tests
+  r-cran-strucchange
+  r-cran-polynom
+  r-cran-numderiv
+  r-cran-rlang
+  r-cran-matrix
+  r-cran-data.table
+  r-cran-statmod
 )
 
 missing=()
@@ -53,4 +61,18 @@ if ! Rscript -e 'quit(status = !requireNamespace("pg", quietly = TRUE))' >/dev/n
   rm -rf "$tmp"
 fi
 
-Rscript -e 'for (p in c("Rcpp", "RcppArmadillo", "pg", "MASS", "coda")) stopifnot(requireNamespace(p, quietly = TRUE))'
+# aghq (adaptive Gauss-Hermite quadrature) and its mvQuad dependency are not
+# on apt; build pinned commits from GitHub (mvQuad via the CRAN mirror).
+install_git_pkg() {  # name url ref
+  if ! Rscript -e "quit(status = !requireNamespace('$1', quietly = TRUE))" >/dev/null 2>&1; then
+    tmp="$(mktemp -d)"
+    git clone --quiet "$2" "$tmp/$1"
+    git -C "$tmp/$1" checkout --quiet "$3"
+    R CMD INSTALL --no-docs --no-build-vignettes "$tmp/$1"
+    rm -rf "$tmp"
+  fi
+}
+install_git_pkg mvQuad https://github.com/cran/mvQuad.git 8539412a3a0b3b942ca185f69f451f278bc87520  # 1.0-10
+install_git_pkg aghq https://github.com/awstringer1/aghq.git 5c320d26b23da7ad6dc855a083efce980a029b42  # 0.4.3
+
+Rscript -e 'for (p in c("Rcpp", "RcppArmadillo", "pg", "MASS", "coda", "aghq", "strucchange")) stopifnot(requireNamespace(p, quietly = TRUE))'
