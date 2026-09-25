@@ -26,6 +26,9 @@ APT_PKGS=(
   r-cran-matrix
   r-cran-data.table
   r-cran-statmod
+  # PISA SPSS files
+  r-cran-haven
+  r-cran-foreign
 )
 
 missing=()

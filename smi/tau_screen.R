@@ -8,6 +8,16 @@ if (!exists("score_instability")) source("aghq_score.R")
 tau_screen <- function(fit, z, Xtau = NULL) {
   s <- fit$tau_score
   if (is.null(s)) stop("fit has no tau_score (eta must be > 0)")
+  ok <- !is.na(z); s <- s[ok]; z <- z[ok]; if (!is.null(Xtau)) Xtau <- as.matrix(Xtau)[ok, , drop = FALSE]
+  if (length(unique(z)) == 2) {                 # binary z: score test at the group boundary
+    S <- if (is.null(Xtau)) cbind(s) else cbind(s, s * Xtau)
+    S <- scale(S, scale = FALSE); n <- nrow(S)
+    se <- if (ncol(S) == 1) S[, 1] else drop(S[, 1] - S[, -1, drop = FALSE] %*%
+      solve(crossprod(S[, -1, drop = FALSE]), crossprod(S[, -1, drop = FALSE], S[, 1])))
+    g <- z == max(z); pi1 <- mean(g)
+    lm <- sum(se[g])^2 / (n * mean(se^2) * pi1 * (1 - pi1))
+    return(c(DM = NA, p_DM = NA, LM2 = lm, p_LM2 = pchisq(lm, 1, lower.tail = FALSE)))
+  }
   if (!is.null(Xtau)) return(score_instability(scale(cbind(s, s * as.matrix(Xtau)), scale = FALSE), 1, z))
   s <- s - mean(s); n <- length(s)
   B <- cumsum(s[order(z)]) / sqrt(n * mean(s^2)); mid <- floor(n / 2)
