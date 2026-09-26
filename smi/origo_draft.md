@@ -42,7 +42,7 @@ V  : O2 contribution (boundary condition on RT as collateral information + a pro
           differences and DRT turn that information into group bias.
        2. Bolsinova & Tijmstra (2018, BJMSP) — partial/oppose — reason: precision gains are
           real, but RMSE-type evaluation hides the group bias shown here.
-       3. Kern & Choe (2021, APM) — partial — reason: J-EAP is evaluated on individual accuracy;
+       3. Kern et al. (2021, APM) — partial — reason: J-EAP is evaluated on individual accuracy;
           its use for group comparisons needs the target-specific check.
        4. Frazier, Nott et al. (2023/2025, JASA) — support/extend — reason: posterior-risk
           selection of semi-modular posteriors; we give a plug-in, target-specific rule for a
