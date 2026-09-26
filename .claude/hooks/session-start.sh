@@ -66,16 +66,25 @@ fi
 
 # aghq (adaptive Gauss-Hermite quadrature) and its mvQuad dependency are not
 # on apt; build pinned commits from GitHub (mvQuad via the CRAN mirror).
-install_git_pkg() {  # name url ref
-  if ! Rscript -e "quit(status = !requireNamespace('$1', quietly = TRUE))" >/dev/null 2>&1; then
+install_git_pkg() {  # name url ref [subdir] [min version]
+  local need=1
+  if [ -n "${5:-}" ]; then
+    Rscript -e "quit(status = !(requireNamespace('$1', quietly = TRUE) && packageVersion('$1') >= '$5'))" >/dev/null 2>&1 && need=0
+  else
+    Rscript -e "quit(status = !requireNamespace('$1', quietly = TRUE))" >/dev/null 2>&1 && need=0
+  fi
+  if [ "$need" = 1 ]; then
     tmp="$(mktemp -d)"
     git clone --quiet "$2" "$tmp/$1"
     git -C "$tmp/$1" checkout --quiet "$3"
-    R CMD INSTALL --no-docs --no-build-vignettes "$tmp/$1"
+    MAKEFLAGS=-j4 R CMD INSTALL --preclean --no-docs --no-build-vignettes "$tmp/$1/${4:-}"
     rm -rf "$tmp"
   fi
 }
 install_git_pkg mvQuad https://github.com/cran/mvQuad.git 8539412a3a0b3b942ca185f69f451f278bc87520  # 1.0-10
 install_git_pkg aghq https://github.com/awstringer1/aghq.git 5c320d26b23da7ad6dc855a083efce980a029b42  # 0.4.3
+# RTMB needs a newer TMB than Ubuntu's r-cran-tmb (1.9.10 lacks lbeta)
+install_git_pkg TMB https://github.com/kaskr/adcomp.git 4957bfd58f53cb8e2c36cddecef10dbcb2065fd2 TMB 1.9.25
+install_git_pkg RTMB https://github.com/kaskr/RTMB.git ea2434a51d3ee32091d9391922e9c423d7290260 RTMB 2.0
 
-Rscript -e 'for (p in c("Rcpp", "RcppArmadillo", "pg", "MASS", "coda", "aghq", "strucchange")) stopifnot(requireNamespace(p, quietly = TRUE))'
+Rscript -e 'for (p in c("Rcpp", "RcppArmadillo", "pg", "MASS", "coda", "aghq", "strucchange", "RTMB", "haven")) stopifnot(requireNamespace(p, quietly = TRUE))'
